@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PulseStream</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head><body>
+<header><input id="q" placeholder="Search all providers…" aria-label="Search" autofocus><button id="theme" title="Toggle theme">Theme</button><button id="mini" title="Mini player">Mini</button></header>
+<nav id="nav" aria-label="Library"><button data-view="search" class="on">Search</button><button data-view="recent">Recent</button><button data-view="liked">Liked</button><button data-view="playlists">Playlists</button><button data-view="settings">Settings</button></nav>
+<div id="chips" aria-label="Playlist targets: click to select, drop tracks here"></div>
+<main id="list" role="list"></main>
+<aside id="lyr" hidden><pre id="lyrtext"></pre></aside>
+<div id="toast" role="status"></div>
+<footer>
+ <div id="now" aria-live="polite">Nothing playing</div>
+ <button id="shuf" title="Shuffle" aria-label="Shuffle"></button><button id="prev" aria-label="Previous"></button><button id="pp" aria-label="Play or pause"></button><button id="next" aria-label="Next"></button><button id="rep" title="Repeat: off" aria-label="Repeat"></button><button id="lyrbtn" title="Lyrics">Lyrics</button>
+ <input id="seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Seek"><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
+</footer></body></html>
