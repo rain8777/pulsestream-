@@ -11,6 +11,7 @@ impl Cache {
              CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT, ts INTEGER);
              CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY, track TEXT, ts INTEGER);
              CREATE TABLE IF NOT EXISTS likes(track_key TEXT PRIMARY KEY, track TEXT);
+             CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
              CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY, name TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS pl_items(id INTEGER PRIMARY KEY, pid INTEGER NOT NULL, track TEXT NOT NULL);
              DELETE FROM kv WHERE ts < strftime('%s','now') - 604800;
@@ -82,6 +83,15 @@ impl Cache {
         if let Ok(c) = self.0.lock() {
             let _ = c.execute("DELETE FROM pl_items WHERE pid=?1", params![pid]);
             let _ = c.execute("DELETE FROM playlists WHERE id=?1", params![pid]);
+        }
+    }
+    pub fn get_setting(&self, k: &str) -> Option<String> {
+        let c = self.0.lock().ok()?;
+        c.query_row("SELECT v FROM settings WHERE k=?1", params![k], |r| r.get(0)).ok()
+    }
+    pub fn set_setting(&self, k: &str, v: &str) {
+        if let Ok(c) = self.0.lock() {
+            let _ = c.execute("INSERT OR REPLACE INTO settings VALUES(?1,?2)", params![k, v]);
         }
     }
 }

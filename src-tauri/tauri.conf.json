@@ -19,7 +19,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src * data:; media-src *; style-src 'self'; script-src 'self'"
+      "csp": "default-src 'self'; img-src * data: asset: http://asset.localhost; media-src * asset: http://asset.localhost; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; connect-src ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {

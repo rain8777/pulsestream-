@@ -28,3 +28,6 @@ body.lyr main,body.lyr #chips{display:none}
 #toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--card);border:1px solid var(--acc);border-radius:6px;padding:6px 12px;opacity:0;pointer-events:none}
 #toast.show{opacity:1}sup{font-size:9px;margin-left:1px}
 body.mini nav,body.mini #chips,body.mini #lyr,body.mini #lyrbtn,body.mini #toast{display:none}
+#ytbox{position:fixed;right:12px;bottom:70px;width:220px;height:220px;border-radius:8px;overflow:hidden;background:#000;box-shadow:0 4px 18px #0006;z-index:5}
+#ytbox[hidden]{display:none}#ytbox iframe{width:100%;height:100%;border:0}body.mini #ytbox{display:none}
+#seek:disabled{opacity:.4}.set .row2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.set .dim{color:var(--dim)}

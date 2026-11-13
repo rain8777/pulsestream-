@@ -13,6 +13,10 @@ Install Rust (MSVC) + VS Build Tools, then: `npm i -g @tauri-apps/cli@2` and `ta
 (icons are already included). Output: `src-tauri/target/release/pulsestream.exe`.
 Needs the WebView2 runtime (preinstalled on Windows 10/11).
 
+## Sources (all merged into one search)
+My music (local folder), Audius, YouTube Music (search + YouTube's official embedded player),
+Radio Browser (live radio), Deezer (30s previews, off by default; enable in Settings).
+
 ## Features
 Search (Deezer previews), queue, shuffle, repeat off/all/one, seek, volume, media keys, tray
 (close = hide), mini player, dark/light, recently played, liked songs, playlists (click a chip

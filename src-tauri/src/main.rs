@@ -2,7 +2,9 @@
 mod cache;
 mod providers;
 
-use providers::{deezer::Deezer, Provider, Track};
+use providers::{audius::Audius, deezer::Deezer, local::{self, Library, Local}, radio::Radio, ytmusic::YtMusic, Provider, Track};
+use std::sync::{atomic::{AtomicU32, Ordering}, Arc, Mutex};
+use tauri_plugin_dialog::DialogExt;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -16,6 +18,8 @@ struct AppState {
     cache: cache::Cache,
     providers: Vec<Box<dyn Provider>>,
     http: reqwest::Client,
+    local: Library,
+    epoch: AtomicU32,
 }
 
 fn show_main(app: &tauri::AppHandle) {
@@ -24,18 +28,28 @@ fn show_main(app: &tauri::AppHandle) {
 fn js<T: serde::Serialize>(t: &T) -> String { serde_json::to_string(t).unwrap_or_default() }
 
 #[tauri::command]
-async fn search(q: String, st: tauri::State<'_, AppState>) -> Result<Vec<Track>, String> {
-    let key = format!("s:{}", q.trim().to_lowercase());
+async fn search(q: String, previews: Option<bool>, st: tauri::State<'_, AppState>) -> Result<Vec<Track>, String> {
+    let pv = previews.unwrap_or(false);
+    let key = format!("s{}{}:{}", st.epoch.load(Ordering::Relaxed), pv as u8, q.trim().to_lowercase());
     if let Some(v) = st.cache.get(&key, 600) {
         if let Ok(t) = serde_json::from_str(&v) { return Ok(t); }
     }
     // All providers in parallel; one failing provider never breaks the search.
-    let results = futures::future::join_all(st.providers.iter().map(|p| p.search(&q))).await;
-    let mut out = vec![];
+    let results = futures::future::join_all(st.providers.iter().filter(|p| pv || p.id() != "deezer").map(|p| p.search(&q))).await;
+    // Round-robin merge so every source shows up near the top.
+    let mut lists = vec![];
+    let mut failed = false;
     for r in results {
-        match r { Ok(mut t) => out.append(&mut t), Err(e) => eprintln!("provider error: {e}") }
+        match r { Ok(t) => lists.push(t.into_iter()), Err(e) => { failed = true; eprintln!("provider error: {e}") } }
     }
-    st.cache.put(&key, &js(&out));
+    let mut out = vec![];
+    loop {
+        let mut any = false;
+        for l in lists.iter_mut() { if let Some(t) = l.next() { out.push(t); any = true; } }
+        if !any { break; }
+    }
+    // Never cache a partial/empty answer: a transient failure must not stick for 10 minutes.
+    if !failed && !out.is_empty() { st.cache.put(&key, &js(&out)); }
     Ok(out)
 }
 
@@ -78,8 +92,10 @@ async fn lyrics(artist: String, title: String, duration: u32, st: tauri::State<'
     let key = format!("ly:{}|{}", artist.to_lowercase(), title.to_lowercase());
     if let Some(v) = st.cache.get(&key, 604800) { return Ok(if v.is_empty() { None } else { Some(v) }); }
     let d = duration.to_string();
+    let mut qp = vec![("artist_name", artist.as_str()), ("track_name", title.as_str())];
+    if duration > 0 { qp.push(("duration", d.as_str())); }
     let r = st.http.get("https://lrclib.net/api/get")
-        .query(&[("artist_name", artist.as_str()), ("track_name", title.as_str()), ("duration", d.as_str())])
+        .query(&qp)
         .send().await.map_err(|e| e.to_string())?;
     let text = if r.status().is_success() {
         let v: serde_json::Value = r.json().await.map_err(|e| e.to_string())?;
@@ -97,8 +113,31 @@ fn autostart_set(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     (if on { m.enable() } else { m.disable() }).map_err(|e| e.to_string())
 }
 
+/// Opens a folder picker, remembers the folder, scans it for audio files.
+#[tauri::command]
+async fn pick_music_folder(app: tauri::AppHandle, st: tauri::State<'_, AppState>) -> Result<Option<(String, usize)>, String> {
+    let Some(fp) = app.dialog().file().blocking_pick_folder() else { return Ok(None) };
+    let path = fp.into_path().map_err(|e| e.to_string())?;
+    st.cache.set_setting("music_dir", &path.to_string_lossy());
+    let _ = app.asset_protocol_scope().allow_directory(&path, true);
+    let p = path.clone();
+    let tracks = tauri::async_runtime::spawn_blocking(move || local::scan(&p)).await.map_err(|e| e.to_string())?;
+    let n = tracks.len();
+    if let Ok(mut g) = st.local.lock() { *g = tracks; }
+    st.epoch.fetch_add(1, Ordering::Relaxed); // invalidates cached searches
+    Ok(Some((path.to_string_lossy().to_string(), n)))
+}
+
+#[tauri::command]
+fn music_folder_get(st: tauri::State<'_, AppState>) -> Option<(String, usize)> {
+    let d = st.cache.get_setting("music_dir")?;
+    let n = st.local.lock().map(|g| g.len()).unwrap_or(0);
+    Some((d, n))
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(
@@ -116,11 +155,36 @@ fn main() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let client = reqwest::Client::builder().user_agent("PulseStream/0.2 (https://github.com/pulsestream)").build()?;
+            let cache = cache::Cache::open(&dir.join("cache.db"))?;
+            let lib: Library = Arc::new(Mutex::new(vec![]));
+            let music_dir = cache.get_setting("music_dir");
             app.manage(AppState {
-                cache: cache::Cache::open(&dir.join("cache.db"))?,
-                providers: vec![Box::new(Deezer(client.clone()))],
+                cache,
+                // Order = priority in the merged results. Deezer (30s previews) last.
+                providers: vec![
+                    Box::new(Local(lib.clone())),
+                    Box::new(Audius(client.clone())),
+                    Box::new(YtMusic(client.clone())),
+                    Box::new(Radio(client.clone())),
+                    Box::new(Deezer(client.clone())),
+                ],
                 http: client,
+                local: lib,
+                epoch: AtomicU32::new(0),
             });
+            // Scan the saved music folder in the background, then invalidate cached searches.
+            if let Some(d) = music_dir {
+                let p = std::path::PathBuf::from(d);
+                let _ = app.asset_protocol_scope().allow_directory(&p, true);
+                let h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(t) = tauri::async_runtime::spawn_blocking(move || local::scan(&p)).await {
+                        let st = h.state::<AppState>();
+                        if let Ok(mut g) = st.local.lock() { *g = t; }
+                        st.epoch.fetch_add(1, Ordering::Relaxed);
+                    }
+                });
+            }
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let mut tray = TrayIconBuilder::new().show_menu_on_left_click(false);
@@ -153,7 +217,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             search, played, recent, toggle_like, likes, playlist_create, playlists, playlist_add,
-            playlist_tracks, playlist_delete, lyrics, autostart_get, autostart_set
+            playlist_tracks, playlist_delete, lyrics, autostart_get, autostart_set, pick_music_folder, music_folder_get
         ])
         .run(tauri::generate_context!())
         .expect("error while running PulseStream");

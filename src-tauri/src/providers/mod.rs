@@ -2,7 +2,11 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod audius;
 pub mod deezer;
+pub mod local;
+pub mod radio;
+pub mod ytmusic;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Track {
